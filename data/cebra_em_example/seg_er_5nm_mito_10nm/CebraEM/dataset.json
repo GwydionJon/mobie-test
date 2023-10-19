@@ -1,0 +1,190 @@
+{
+  "is2D": false,
+  "sources": {
+    "em-membrane_prediction": {
+      "image": {
+        "imageData": {
+          "bdv.n5": {
+            "relativePath": "images/bdv-n5/em-membrane_prediction.xml"
+          }
+        }
+      }
+    },
+    "em-raw": {
+      "image": {
+        "imageData": {
+          "bdv.n5": {
+            "relativePath": "images/bdv-n5/em-raw.xml"
+          }
+        }
+      }
+    },
+    "em-raw.n5": {
+      "image": {
+        "imageData": {
+          "bdv.n5": {
+            "relativePath": "images/bdv-n5/em-raw.n5.xml"
+          }
+        }
+      }
+    },
+    "em-supervoxels": {
+      "image": {
+        "imageData": {
+          "bdv.n5": {
+            "relativePath": "images/bdv-n5/em-supervoxels.xml"
+          }
+        }
+      }
+    },
+    "er-it00_b0_5_stitched": {
+      "image": {
+        "imageData": {
+          "bdv.n5": {
+            "relativePath": "images/bdv-n5/er-it00_b0_5_stitched.xml"
+          }
+        }
+      }
+    },
+    "mito-it00_b0_6_stitched": {
+      "image": {
+        "imageData": {
+          "bdv.n5": {
+            "relativePath": "images/bdv-n5/mito-it00_b0_6_stitched.xml"
+          }
+        }
+      }
+    }
+  },
+  "timepoints": 1,
+  "views": {
+    "default": {
+      "isExclusive": false,
+      "sourceDisplays": [
+        {
+          "imageDisplay": {
+            "color": "white",
+            "contrastLimits": [
+              0,
+              255
+            ],
+            "name": "em-raw",
+            "opacity": 1.0,
+            "sources": [
+              "em-raw"
+            ]
+          }
+        }
+      ],
+      "uiSelectionGroup": "bookmark"
+    },
+    "em-membrane_prediction": {
+      "isExclusive": false,
+      "sourceDisplays": [
+        {
+          "imageDisplay": {
+            "color": "white",
+            "contrastLimits": [
+              0,
+              255
+            ],
+            "name": "em-membrane_prediction",
+            "opacity": 1.0,
+            "sources": [
+              "em-membrane_prediction"
+            ]
+          }
+        }
+      ],
+      "uiSelectionGroup": "images"
+    },
+    "em-raw": {
+      "isExclusive": false,
+      "sourceDisplays": [
+        {
+          "imageDisplay": {
+            "color": "white",
+            "contrastLimits": [
+              0,
+              255
+            ],
+            "name": "em-raw",
+            "opacity": 1.0,
+            "sources": [
+              "em-raw"
+            ]
+          }
+        }
+      ],
+      "uiSelectionGroup": "images"
+    },
+    "em-raw.n5": {
+      "isExclusive": false,
+      "sourceDisplays": [
+        {
+          "imageDisplay": {
+            "color": "white",
+            "contrastLimits": [
+              0,
+              255
+            ],
+            "name": "em-raw.n5",
+            "opacity": 1.0,
+            "sources": [
+              "em-raw.n5"
+            ]
+          }
+        }
+      ],
+      "uiSelectionGroup": "images"
+    },
+    "em-supervoxels": {
+      "isExclusive": false,
+      "sourceDisplays": [
+        {
+          "segmentationDisplay": {
+            "lut": "glasbey",
+            "name": "em-supervoxels",
+            "opacity": 0.5,
+            "sources": [
+              "em-supervoxels"
+            ]
+          }
+        }
+      ],
+      "uiSelectionGroup": "segmentations"
+    },
+    "er-it00_b0_5_stitched": {
+      "isExclusive": false,
+      "sourceDisplays": [
+        {
+          "segmentationDisplay": {
+            "lut": "glasbey",
+            "name": "er-it00_b0_5_stitched",
+            "opacity": 0.5,
+            "sources": [
+              "er-it00_b0_5_stitched"
+            ]
+          }
+        }
+      ],
+      "uiSelectionGroup": "segmentations"
+    },
+    "mito-it00_b0_6_stitched": {
+      "isExclusive": false,
+      "sourceDisplays": [
+        {
+          "segmentationDisplay": {
+            "lut": "glasbey",
+            "name": "mito-it00_b0_6_stitched",
+            "opacity": 0.5,
+            "sources": [
+              "mito-it00_b0_6_stitched"
+            ]
+          }
+        }
+      ],
+      "uiSelectionGroup": "segmentations"
+    }
+  }
+}

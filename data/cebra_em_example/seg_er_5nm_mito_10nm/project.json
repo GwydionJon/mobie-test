@@ -1,0 +1,10 @@
+{
+  "datasets": [
+    "CebraEM"
+  ],
+  "defaultDataset": "CebraEM",
+  "imageDataFormats": [
+    "bdv.n5"
+  ],
+  "specVersion": "0.2.0"
+}
