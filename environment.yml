@@ -10,4 +10,7 @@ dependencies:
     - scikit-images
     - python-elf
     - numpy
-    
+    - trimesh
+    -pip:
+        - elf
+        - skan
