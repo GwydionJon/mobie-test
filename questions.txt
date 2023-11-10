@@ -1,0 +1,34 @@
+- do we need part 1_1 approach 1?
+- is the voxel based approach with line of sight a good idea or should we go with a mesh based approach?
+- how flat is flat and how are we supposed to segment the large ER structures?
+- regularity of sheet circumference: would the ratio of how circular the sheet is be enough?
+- do mitochondria networks actually connect or are they just spatially close to each other?
+
+
+personal notes in no particular order:
+
+-   if we get our geometry information from the inertia vectors, 
+    we only really need the mesh for the surface area. If we could use the very rough surface area from the voxels, 
+    or by a simple close polygon fit (scipy can to that) than we wouldn't need to do the expensive
+    transformation and it should be much easier to work with higher resolutions.
+
+-   definitely add some kind of save function, especially for the meshes if we keep them.
+
+-   the trimesh library can take care of the mesh extension if wee need it:
+            # This will extend the mesh by 1 unit in the x, y, and z directions
+            translation = [1, 1, 1]
+            # Apply the translation
+            mesh.apply_translation(translation) or apply_scale.
+
+-   the advantage of using the mesh for finding close contact sides is that we don't have to worry about including non surface voxels.
+
+-   Regarding the holes: 
+    Maybe we can calculate the numer of intersections on a line horizontal to the flat axis.
+    if we get more than 2 transitions from background to object it means there must be a hole. this needs to be done multile times at different positions.
+
+-   I guess we need to find some cutoff values for cylindricality and flatness, as to when we decide something is a sheet or a maceroni
+
+-   sheet stacking: i think stacked sheets should  have a similar inertia tensor, just different coordinates
+
+-   calculate flatness, cylindricality along points of the skeleton paths, as these should be at the center of each part.
+        
