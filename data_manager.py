@@ -11,6 +11,10 @@ from dash import Dash, dcc, html, Input, Output
 import plotly.express as px
 import logging
 from scipy.spatial import ConvexHull
+import skan
+from skimage.morphology import skeletonize_3d
+import itertools
+from scipy import ndimage
 
 
 class DataManager:
@@ -40,9 +44,9 @@ class DataManager:
         self.mesh_dict = None
         self.collision_dict = None
         self.distance_df = None
-
-
-
+        self.skeletons = None
+        self.skeletons_all_branches_dict = None
+        self.skeletons_mean_branches_dict = None
 
     def _load_dataset(self):
         dataset_json = list(self.ds_dir_path.glob("*.json"))[0]
@@ -92,7 +96,9 @@ class DataManager:
         self.resolution[organelle_type] = np.asarray(original_resolution) * np.asarray(
             actual_scaling_factor
         )
-        self.total_volume[organelle_type] =np.prod(self.resolution[organelle_type] * self.datasets[organelle_type].shape)
+        self.total_volume[organelle_type] = np.prod(
+            self.resolution[organelle_type] * self.datasets[organelle_type].shape
+        )
 
         logging.info(f"Successfully read {organelle_filename}.")
 
@@ -220,12 +226,12 @@ class DataManager:
             mesh_dict[label]["volume"] = tri_mesh.volume
             mesh_dict[label]["surf_area_mesh_nm"] = tri_mesh.area
             mesh_dict[label]["water_tight"] = tri_mesh.is_watertight
-            sphericity_index, flatness_ratio = self._calculate_sphericity_and_flatness(tri_mesh)
+            sphericity_index, flatness_ratio = self._calculate_sphericity_and_flatness(
+                tri_mesh
+            )
 
             mesh_dict[label]["sphericity"] = sphericity_index
             mesh_dict[label]["flatness_ratio"] = flatness_ratio
-
-
 
         self.analysis_results["surf_area_mesh_nm"] = [
             mesh["surf_area_mesh_nm"] for mesh in mesh_dict.values()
@@ -241,10 +247,12 @@ class DataManager:
         # sphericity and flatness ratio
         # sphericity closer to 1 means more spherical
         # flatness ratio closer to 0 means more flat, 1 would be a perfect cube
-        self.analysis_results["sphericity"] = [mesh["sphericity"] for mesh in mesh_dict.values()]
-        self.analysis_results["flatness_ratio"] = [mesh["flatness_ratio"] for mesh in mesh_dict.values()]
-
-
+        self.analysis_results["sphericity"] = [
+            mesh["sphericity"] for mesh in mesh_dict.values()
+        ]
+        self.analysis_results["flatness_ratio"] = [
+            mesh["flatness_ratio"] for mesh in mesh_dict.values()
+        ]
 
         self.mesh_dict = mesh_dict
 
@@ -254,7 +262,7 @@ class DataManager:
         surface_area = mesh.area
 
         # Calculate the radius of a sphere with the same volume as the mesh
-        sphere_radius = ((3 * volume) / (4 * np.pi))**(1/3)
+        sphere_radius = ((3 * volume) / (4 * np.pi)) ** (1 / 3)
 
         # Calculate the surface area of a sphere with the same volume as the mesh
         sphere_surface_area = 4 * np.pi * sphere_radius**2
@@ -272,14 +280,7 @@ class DataManager:
         # Calculate the flatness ratio
         flatness_ratio = min(dimensions) / max(dimensions)
 
-
-
-
-
-
         return sphericity_index, flatness_ratio
-
-
 
     # for task 1.1
     def _get_distance(self, obj_id_1, obj_id_2):
@@ -294,8 +295,8 @@ class DataManager:
         col_manager_test.add_object(f"mesh{2}", mesh2)
 
         result = col_manager_test.min_distance_internal()
-        return result 
-    
+        return result
+
     def calculate_distance_matrix(self):
         """Calculate the distance matrix between all objects in the dataset.
 
@@ -375,12 +376,13 @@ class DataManager:
                     neighbours_dict[label].append(neighbours_index)
 
             if label in list(neighbours_dict.keys()):
-              self.analysis_results.loc[label, f"num_neighbours_{max_distance}-{min_distance}"] = len(neighbours_dict[label])
+                self.analysis_results.loc[
+                    label, f"num_neighbours_{max_distance}-{min_distance}"
+                ] = len(neighbours_dict[label])
 
         return neighbours_dict
 
-   
-
+    # for task 1.2
     def detect_collisions(self):
         """Detect collisions between all objects in the dataset.
 
@@ -405,45 +407,234 @@ class DataManager:
         # https://github.com/mikedh/trimesh/issues/333
         # intersection = trimesh.boolean.intersection(meshes)
 
-
         self.collision_dict = defaultdict(lambda: defaultdict(list))
         for data in data_list:
             names = f"{list(data.names)[0]}__{list(data.names)[1]}"
             # add points to al collisions dict
             self.collision_dict[names]["points"].append(data.point)
 
-       
-
-            
-
-        for name,collision in self.collision_dict.items():
+        for name, collision in self.collision_dict.items():
             collision_array = np.asarray(collision["points"])
             volume = ConvexHull(collision_array).volume
-            self.collision_dict[name]["volume"]=volume
+            self.collision_dict[name]["volume"] = volume
 
             # add data to collision data dict
-            self.collision_dict[name]["Mesh 1"]=name.split("__")[0]
-            self.collision_dict[name]["Mesh 2"]=name.split("__")[1]
-  
-
+            self.collision_dict[name]["Mesh 1"] = name.split("__")[0]
+            self.collision_dict[name]["Mesh 2"] = name.split("__")[1]
 
         # add collision data to analysis results
-        self.analysis_results["collisions"]=0
-        self.analysis_results["total_collisions_volume"]=0.0
+        self.analysis_results["collisions"] = 0
+        self.analysis_results["total_collisions_volume"] = 0.0
 
         for key, values in self.collision_dict.items():
             for id in key.split("__"):
-                self.analysis_results.loc[id, "collisions"] +=1
-                self.analysis_results.loc[id, "total_collisions_volume"] += values["volume"]
+                self.analysis_results.loc[id, "collisions"] += 1
+                self.analysis_results.loc[id, "total_collisions_volume"] += values[
+                    "volume"
+                ]
 
-        self.analysis_results["col_per_area"]= self.analysis_results["collisions"] / self.analysis_results["surf_area_mesh_nm"]
-        self.analysis_results["col_per_vol"]= self.analysis_results["collisions"] / self.analysis_results["volume_mesh"]
+        self.analysis_results["col_per_area"] = (
+            self.analysis_results["collisions"]
+            / self.analysis_results["surf_area_mesh_nm"]
+        )
+        self.analysis_results["col_per_vol"] = (
+            self.analysis_results["collisions"] / self.analysis_results["volume_mesh"]
+        )
 
-        return self.analysis_results[["label","surf_area_mesh_nm",	"volume_mesh", "collisions", "total_collisions_volume", "col_per_area", "col_per_vol"]]
+        return self.analysis_results[
+            [
+                "label",
+                "surf_area_mesh_nm",
+                "volume_mesh",
+                "collisions",
+                "total_collisions_volume",
+                "col_per_area",
+                "col_per_vol",
+            ]
+        ]
+
+    # for task 3
+
+    def generate_skeletons(self, organelle_types=None):
+        """Generate skelletons for all objects in the dataset."""
+
+        if organelle_types is None:
+            organelle_types = self.datasets.keys()
+
+        self.skeletons = defaultdict(lambda: defaultdict(dict))
+
+        logging.info("Generating skeletons")
+        for organelle_type in organelle_types:
+            ds = self.datasets[organelle_type]
+            unique_numbers, counts = np.unique(ds, return_counts=True)
+
+            # skip if too few voxels are present
+
+            # skip zero
+            for number, count in zip(unique_numbers[1:], counts[1:]):
+                if count < 2:
+                    continue
+                ds_filtered = self._filter_ds(
+                    f"{organelle_type}_{number}", organelle_type
+                )
+                ds_filtered = ds_filtered / number
+                skeleton = skeletonize_3d(ds_filtered)
+
+                try:
+                    skeleton = skan.Skeleton(
+                        skeleton, spacing=self.resolution[organelle_type]
+                    )
+                    self.skeletons[organelle_type][number]["skeleton"] = skeleton
+
+                    self.skeletons[organelle_type][number]["all_paths"] = [
+                        skeleton.path_coordinates(i) for i in range(skeleton.n_paths)
+                    ]
+
+                except ValueError as e:
+                    logging.debug("Could not generate skeleton for label %s", number)
+                    continue
+
+    def get_mean_skeleton_branches(self, organelle_types=None):
+        if organelle_types is None:
+            organelle_types = self.datasets.keys()
+        if self.skeletons_all_branches_dict is None:
+            self.get_all_skeleton_branches(organelle_types)
+
+        all_branch_dict = self.skeletons_all_branches_dict
+        mean_branch_dict = defaultdict(lambda: defaultdict(list))
+
+        branch_dist_dict = defaultdict(list)
+        euclidean_dist_dict = defaultdict(list)
+        branch_angle_dict = defaultdict(list)
+        key_list = []
+
+        for key, value in all_branch_dict.items():
+            key_list.append((key[0], key[1]))
+            branch_dist_dict[(key[0], key[1])].append(value["branch-distance"])
+            euclidean_dist_dict[(key[0], key[1])].append(value["euclidean-distance"])
+            #again i am not sure why this can happen
+            try:
+                branch_angle_dict[(key[0], key[1])].append(value["branch-angle"])
+            except KeyError:
+                branch_angle_dict[(key[0], key[1])].append(-3)
 
 
+        for key in key_list:
+            mean_branch_dict[key]["mean_branch_len"] = np.mean(branch_dist_dict[key])
+            mean_branch_dict[key]["std_branch_len"] = np.std(branch_dist_dict[key])
 
-        
+            mean_branch_dict[key]["mean_euclidean_distance"] = np.mean(
+                euclidean_dist_dict[key]
+            )
+            mean_branch_dict[key]["std_euclidean_distance"] = np.std(
+                euclidean_dist_dict[key]
+            )
+
+            mean_branch_dict[key]["mean_branch_angle"] = np.mean(branch_angle_dict[key])
+            mean_branch_dict[key]["std_branch_angle"] = np.std(branch_angle_dict[key])
+        self.skeletons_mean_branches_dict = mean_branch_dict
+
+        # convert to df
+        df = pd.DataFrame(mean_branch_dict).T
+        df.index.names = ["organelle type", "org id"]
+
+        return df
+
+    def get_all_skeleton_branches(self, organelle_types=None):
+        if self.skeletons is None:
+            self.generate_skeletons()
+        if organelle_types is None:
+            organelle_types = self.datasets.keys()
+
+        branch_dict = defaultdict(dict)
+
+        # get branch informations:
+        # no branches from branch, branch length, euclidean length, branch start, branch end, branch type, branch order, branch angle
+        for organelle_type in organelle_types:
+            for number, skeleton in self.skeletons[organelle_type].items():
+                paths_table = skan.summarize(skeleton["skeleton"])
+                paths_dict = paths_table.to_dict("records")
+
+                # find longest path for angle calculation
+                longest_path_id = paths_table["branch-distance"].argmax()
+                longest_path_coords_src = paths_table.loc[longest_path_id][
+                    ["image-coord-src-0", "image-coord-src-1", "image-coord-src-2"]
+                ].values
+                longest_path_coords_dst = paths_table.loc[longest_path_id][
+                    ["image-coord-dst-0", "image-coord-dst-1", "image-coord-dst-2"]
+                ].values
+
+                main_skelleton_id = paths_table.loc[longest_path_id]["skeleton-id"]
+                main_vector = longest_path_coords_dst - longest_path_coords_src
+
+                for i, path in enumerate(paths_dict):
+                    branch_dict[(organelle_type, number, i)]["skeleton-id"] = path[
+                        "skeleton-id"
+                    ]
+                    branch_dict[(organelle_type, number, i)]["branch-distance"] = path[
+                        "branch-distance"
+                    ]
+                    branch_dict[(organelle_type, number, i)][
+                        "branch-start"
+                    ] = np.asarray(
+                        [
+                            path["image-coord-src-0"],
+                            path["image-coord-src-1"],
+                            path["image-coord-src-2"],
+                        ]
+                    )
+                    branch_dict[(organelle_type, number, i)]["branch-end"] = np.asarray(
+                        [
+                            path["image-coord-dst-0"],
+                            path["image-coord-dst-1"],
+                            path["image-coord-dst-2"],
+                        ]
+                    )
+                    branch_dict[(organelle_type, number, i)][
+                        "euclidean-distance"
+                    ] = path["euclidean-distance"]
+                    branch_dict[(organelle_type, number, i)]["branch-type"] = path[
+                        "branch-type"
+                    ]
+
+                    if path["branch-type"] != 1:
+                        branch_dict[(organelle_type, number, i)]["branch-angle"] = 0
+                        branch_dict[(organelle_type, number, i)][
+                            "branch-angle_partner"
+                        ] = -1
+                    elif (
+                        path["branch-type"] in [1, 2]
+                        and main_skelleton_id
+                        == branch_dict[(organelle_type, number, i)]["skeleton-id"]
+                    ):
+                        branch_vector = (
+                            branch_dict[(organelle_type, number, i)]["branch-end"]
+                            - branch_dict[(organelle_type, number, i)]["branch-start"]
+                        )
+
+                        np.seterr(all="raise")
+                        # not sure why this happens
+                        try:
+                            cos_angle = np.dot(main_vector, branch_vector) / (
+                                np.linalg.norm(main_vector)
+                                * np.linalg.norm(branch_vector)
+                            )
+                            angle = np.arccos(cos_angle) * 180 / np.pi
+                        except:
+                            angle = -1
+
+                        branch_dict[(organelle_type, number, i)][
+                            "branch-angle_partner"
+                        ] = longest_path_id
+
+                        branch_dict[(organelle_type, number, i)]["branch-angle"] = angle
+
+        self.skeletons_all_branches_dict = branch_dict
+
+        # convert to df
+        df = pd.DataFrame(branch_dict).T
+        df.index.names = ["organelle type", "org id", "branch id"]
+        return df
 
     def draw_3d_meshes(self, filter_ids=None, exclude_ids=None):
         """Draw the meshes in 3d using plotly, allows for filtering.
@@ -464,8 +655,6 @@ class DataManager:
             index = self.mesh_dict.keys()
         else:
             index = filter_ids
-
-       
 
         if isinstance(index, str):
             index = [index]
@@ -494,7 +683,8 @@ class DataManager:
                 j=facesT[1],
                 k=facesT[2],
                 name=mesh_idx,
-                opacity=0.8,            )
+                opacity=0.8,
+            )
             meshes.append(go_mesh)
 
         if self.collision_dict is not None:
@@ -522,7 +712,7 @@ class DataManager:
 
         return fig
 
-    def draw_2d_slices(self, organelle_type, port = 8083):
+    def draw_2d_slices(self, organelle_type, port=8083):
         """Start a small dash app that allows you to scroll through the slices of the dataset.
 
         :return: Dash app visualization
@@ -555,6 +745,49 @@ class DataManager:
             return fig
 
         app.run_server(debug=True, port=port)
+
+    def draw_3d_skeletons(self, width=6):
+        colors = ["red", "green", "blue", "yellow", "purple", "orange", "pink", "cyan"]
+        color_cycle = itertools.cycle(colors)
+
+        if self.skeletons is None:
+            self.generate_skeletons()
+
+        skeletons = self.skeletons
+        data = []
+        for type_, skels_per_type in skeletons.items():
+            for id, skel in skels_per_type.items():
+
+                color = next(color_cycle)
+
+                for i,path in enumerate(skel["all_paths"]):
+                    
+                    if i==0:
+                        show_legend = True
+                    else:
+                        show_legend = False
+                    
+                    
+                    data.append(
+                         go.Scatter3d(
+                            x=path[:, 0],
+                            y=path[:, 1],
+                            z=path[:, 2],
+                            mode="lines",
+                            name=f"{type_}_{id}",
+                            legendgroup=f"{type_}_{id}",
+                            showlegend= show_legend,
+                            line=dict(color=color, width=width),
+                        )
+                    )
+
+        # Create a figure and add the data
+        fig = go.Figure(data=data)
+
+        # Set the title and axis labels
+        fig.update_layout(scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z"))
+
+        return fig.show()
 
     def _filter_ds(self, filter_index, organelle_type):
         # filter for one value
