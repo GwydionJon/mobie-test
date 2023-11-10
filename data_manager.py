@@ -93,6 +93,8 @@ class DataManager:
         actual_scaling_factor = self.datasets[organelle_type].attrs[
             "downsamplingFactors"
         ]
+
+        # TODO resolution can be read from the json file inside the n5 file
         self.resolution[organelle_type] = np.asarray(original_resolution) * np.asarray(
             actual_scaling_factor
         )
@@ -175,6 +177,23 @@ class DataManager:
                 prop_dict[label]["solidity"] = prop.solidity
 
                 prop_dict[label]["all_coords"] = prop.coords
+
+                #prop_dict[label]["orientation"] = prop.orientation
+                
+                prop_dict[label]["inertia_tensor"] = prop.inertia_tensor
+
+                eigenvalues, _ = np.linalg.eig(prop.inertia_tensor)
+
+                flatness = eigenvalues[0] / eigenvalues[2]
+                cylindricality = eigenvalues[1] / eigenvalues[2]
+                sphericality = 1 - max(flatness, cylindricality)
+
+                prop_dict[label]["flatness"]=flatness
+                prop_dict[label]["cylindricality"]=cylindricality
+                prop_dict[label]["sphericality_inertia_tensor"]=sphericality
+
+
+
 
         df = pd.DataFrame(prop_dict).T
         df.index.rename("Label", inplace=True)
@@ -261,23 +280,13 @@ class DataManager:
         volume = mesh.volume
         surface_area = mesh.area
 
-        # Calculate the radius of a sphere with the same volume as the mesh
-        sphere_radius = ((3 * volume) / (4 * np.pi)) ** (1 / 3)
+        sphericity_index = (36 * np.pi * volume ** 2) ** (1 / 3) / surface_area
 
-        # Calculate the surface area of a sphere with the same volume as the mesh
-        sphere_surface_area = 4 * np.pi * sphere_radius**2
 
-        # Calculate the sphericity index
-        sphericity_index = sphere_surface_area / surface_area
-
-        # flatness
-        # Calculate the bounding box of the mesh
+        # flatness/squareness
         bounding_box = mesh.bounding_box_oriented
-
-        # Calculate the dimensions of the bounding box
         dimensions = bounding_box.extents
 
-        # Calculate the flatness ratio
         flatness_ratio = min(dimensions) / max(dimensions)
 
         return sphericity_index, flatness_ratio
@@ -740,7 +749,9 @@ class DataManager:
         def filter_heatmap(slice):
             ds_slice = self.datasets[organelle_type][
                 :, :, slice
-            ]  # replace with your own data source
+            ]  
+            # replace 0 with nan
+            ds_slice = np.where(ds_slice == 0, np.nan, ds_slice)
             fig = px.imshow(ds_slice)
             return fig
 

@@ -7,10 +7,10 @@ dependencies:
     - dash
     - plotly
     - pip
-    - scikit-images
+    - scikit-image
     - python-elf
     - numpy
     - trimesh
-    -pip:
+    - pip:
         - elf
         - skan
