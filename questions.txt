@@ -3,7 +3,7 @@
 - how flat is flat and how are we supposed to segment the large ER structures?
 - regularity of sheet circumference: would the ratio of how circular the sheet is be enough?
 - do mitochondria networks actually connect or are they just spatially close to each other?
-
+- how many time steps are there going to be?
 
 personal notes in no particular order:
 
