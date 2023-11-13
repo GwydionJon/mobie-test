@@ -68,6 +68,116 @@ class DataManager:
 
         return paths_dict
 
+
+
+
+    def generate_fake_dataset(self,test_name, n_objects=30, object_size=20, object_distance=100):
+        
+        from scipy.ndimage import binary_fill_holes
+
+
+        # generation
+        scales = np.random.rand(n_objects, 3) * object_size + 10  # Random scales between 10 and 30
+
+        # translation
+
+        #this main translation should remove negative numbers for the coordinates
+
+        translations = np.random.randint(0, object_distance, (n_objects, 3))
+
+        meshes = []
+        meshes_to_remove = []
+        collision_manager = trimesh.collision.CollisionManager()
+
+        for i, (scale, translation) in enumerate(zip(scales, translations)):
+            # Create an icosphere and scale it to create a random shape
+            mesh = trimesh.creation.icosphere(subdivisions=2, radius=1)
+
+            # translate and rotate object, but don't make any overlaps
+
+            mesh.apply_scale(scale)
+
+            mesh.apply_translation(translation)
+            mesh.apply_transform(trimesh.transformations.random_rotation_matrix())
+
+            
+            
+            _, collision_partners = collision_manager.in_collision_single(mesh, return_names=True)
+            if len(collision_partners) > 0:
+                
+                for collision_partner in collision_partners:
+                    
+
+                    mesh = mesh + meshes[collision_partner]["mesh"]
+
+
+                    # note which meshes to remove later
+                    meshes_to_remove.append(collision_partner)
+
+                    # Remove the collision partner from the collision manager
+                    collision_manager.remove_object(collision_partner)
+
+
+
+            # Calculate volume and area
+            volume = mesh.volume
+            area = mesh.area
+            center = mesh.centroid
+            meshes.append({"mesh": mesh,"scale":scale, "volume": volume, "area": area, "center": center})
+            collision_manager.add_object(i, mesh)
+
+        # Remove meshes that were merged
+        for mesh_to_remove in sorted(meshes_to_remove, reverse=True):
+            del meshes[mesh_to_remove]
+
+
+        # voxelize meshes
+        voxel_size = 1
+
+        for mesh_dict in meshes:
+            mesh = mesh_dict["mesh"]
+            voxel = mesh.voxelized(voxel_size)
+
+            voxel.fill()
+            mesh_dict["voxelized"] = voxel
+
+
+        padding = 5*object_distance
+        voxel_array = np.zeros((padding,padding,padding))
+        # approximat data offset so we don't have negativ numbers as an index
+        data_offset = 2*object_distance
+
+        # Add the voxel data of each object to the voxel_array at the correct position
+        for i, mesh_dict in enumerate(meshes):
+            # Voxelizing the mesh
+            voxelized = mesh_dict["voxelized"]
+
+            position = mesh_dict["mesh"].bounds[0].astype(int)+data_offset
+
+            end_position = position + np.array(voxelized.matrix.shape)
+        
+            voxel_array[position[0]:end_position[0], 
+                        position[1]:end_position[1], 
+                        position[2]:end_position[2]] += voxelized.matrix *(i + 1)
+
+        voxel_array = self._array_trim(voxel_array)
+        voxel_array = voxel_array.astype(np.uint16)
+        self.datasets[test_name] = voxel_array
+        self.resolution[test_name] = (1,1,1)
+        self.total_volume = np.prod(voxel_array.shape)
+        self.fake_data_info = meshes
+    def _array_trim(self, arr, ignore=[],margin=0):
+        # small helper function to trim 3d arrays
+        all = np.where(arr != 0)
+        idx = ()
+        for i in range(len(all)):
+            if i in ignore:
+                idx += (np.s_[:],)
+            else:
+                idx += (np.s_[all[i].min()-margin: all[i].max()+margin+1],)
+        return arr[idx]
+
+
     def load_organelle_data(
         self,
         organelle_filename,
@@ -645,7 +755,7 @@ class DataManager:
         df.index.names = ["organelle type", "org id", "branch id"]
         return df
 
-    def draw_3d_meshes(self, filter_ids=None, exclude_ids=None):
+    def draw_3d_meshes(self, filter_ids=None, exclude_ids=None, show_skeletons=False):
         """Draw the meshes in 3d using plotly, allows for filtering.
             If collisions have been detected they will be drawn as well.
 
@@ -672,6 +782,8 @@ class DataManager:
 
         if exclude_ids is not None:
             index = [i for i in index if i not in exclude_ids]
+           
+
 
         for mesh_idx, mesh_raw in self.mesh_dict.items():
             if mesh_idx not in index:
@@ -692,7 +804,7 @@ class DataManager:
                 j=facesT[1],
                 k=facesT[2],
                 name=mesh_idx,
-                opacity=0.8,
+                opacity=0.4,
             )
             meshes.append(go_mesh)
 
@@ -714,6 +826,40 @@ class DataManager:
                 )
                 meshes.append(go_points)
 
+        if show_skeletons:
+            if self.skeletons is None:
+                self.generate_skeletons()
+
+            skeletons = self.skeletons
+            for type_, skels_per_type in skeletons.items():
+                for id_, skel in skels_per_type.items():
+                    type_id= f"{type_}_{id_}"
+                    if type_id in index:
+                        color = "black"
+                        width = 4
+                        for i,path in enumerate(skel["all_paths"]):
+                            
+                            show_legend = False
+                            path = path*self.resolution[type_]
+                            
+                            meshes.append(
+                                go.Scatter3d(
+                                    x=path[:, 0],
+                                    y=path[:, 1],
+                                    z=path[:, 2],
+                                    mode="lines",
+                                    name=f"{type_}_{id_}",
+                                    legendgroup=f"{type_}_{id_}",
+                                    showlegend= show_legend,
+                                    line=dict(color=color, width=width),
+                                )
+                            )
+
+
+
+
+
+
         # draw figure
         fig = go.Figure()
         for mesh_ in meshes:
@@ -721,7 +867,12 @@ class DataManager:
 
         return fig
 
-    def draw_2d_slices(self, organelle_type, port=8083):
+
+
+
+
+
+    def draw_2d_slices(self, organelle_type, port=8083, show_skeletons = False):
         """Start a small dash app that allows you to scroll through the slices of the dataset.
 
         :return: Dash app visualization
