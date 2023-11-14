@@ -14,21 +14,23 @@ from scipy.spatial import ConvexHull
 import skan
 from skimage.morphology import skeletonize_3d
 import itertools
-from scipy import ndimage
 
 
 class DataManager:
     def __init__(self, ds_dir_path):
         """_summary_
 
-        :param ds_path: ds_path should be the path to the folder inside `images`that contains the .n5 files.
+        :param ds_path: ds_path should be the path to the folder inside `images`that
+        contains the .n5 files.
         :type ds_path: str
         :param organelle_filename: The name of the file that contains the organelle data
         :type organelle_filename: str
-        :param scaling_factor: Can be 0,1,2 or 3. The lower the number the higher the resolution, defaults to 3.
+        :param scaling_factor: Can be 0,1,2 or 3. The lower the number the higher
+        the resolution, defaults to 3.
         :type scaling_factor: int, optional
 
-        :param original_resolution: The resolution in nm of the raw uncompressed dataset, defaults to (5,5,5)
+        :param original_resolution: The resolution in nm of the raw uncompressed dataset,
+        defaults to (5,5,5)
         :type original_resolution: tuple, optional
 
         :raises ValueError: Scaling factor must be between 0 and 3.
@@ -68,20 +70,19 @@ class DataManager:
 
         return paths_dict
 
-
-
-
-    def generate_fake_dataset(self,test_name, n_objects=30, object_size=20, object_distance=100):
-        
-        from scipy.ndimage import binary_fill_holes
-
+    def generate_fake_dataset(
+        self, test_name, n_objects=30, object_size=20, object_distance=100, seed=42
+    ):
+        np.random.seed(seed)
 
         # generation
-        scales = np.random.rand(n_objects, 3) * object_size + 10  # Random scales between 10 and 30
+        scales = (
+            np.random.rand(n_objects, 3) * object_size + 10
+        )  # Random scales between 10 and 30
 
         # translation
 
-        #this main translation should remove negative numbers for the coordinates
+        # this main translation should remove negative numbers for the coordinates
 
         translations = np.random.randint(0, object_distance, (n_objects, 3))
 
@@ -100,16 +101,12 @@ class DataManager:
             mesh.apply_translation(translation)
             mesh.apply_transform(trimesh.transformations.random_rotation_matrix())
 
-            
-            
-            _, collision_partners = collision_manager.in_collision_single(mesh, return_names=True)
+            _, collision_partners = collision_manager.in_collision_single(
+                mesh, return_names=True
+            )
             if len(collision_partners) > 0:
-                
                 for collision_partner in collision_partners:
-                    
-
                     mesh = mesh + meshes[collision_partner]["mesh"]
-
 
                     # note which meshes to remove later
                     meshes_to_remove.append(collision_partner)
@@ -117,19 +114,24 @@ class DataManager:
                     # Remove the collision partner from the collision manager
                     collision_manager.remove_object(collision_partner)
 
-
-
             # Calculate volume and area
             volume = mesh.volume
             area = mesh.area
             center = mesh.centroid
-            meshes.append({"mesh": mesh,"scale":scale, "volume": volume, "area": area, "center": center})
+            meshes.append(
+                {
+                    "mesh": mesh,
+                    "scale": scale,
+                    "volume": volume,
+                    "area": area,
+                    "center": center,
+                }
+            )
             collision_manager.add_object(i, mesh)
 
         # Remove meshes that were merged
         for mesh_to_remove in sorted(meshes_to_remove, reverse=True):
             del meshes[mesh_to_remove]
-
 
         # voxelize meshes
         voxel_size = 1
@@ -141,32 +143,34 @@ class DataManager:
             voxel.fill()
             mesh_dict["voxelized"] = voxel
 
-
-        padding = 5*object_distance
-        voxel_array = np.zeros((padding,padding,padding))
+        padding = 5 * object_distance
+        voxel_array = np.zeros((padding, padding, padding))
         # approximat data offset so we don't have negativ numbers as an index
-        data_offset = 2*object_distance
+        data_offset = 2 * object_distance
 
         # Add the voxel data of each object to the voxel_array at the correct position
         for i, mesh_dict in enumerate(meshes):
             # Voxelizing the mesh
             voxelized = mesh_dict["voxelized"]
 
-            position = mesh_dict["mesh"].bounds[0].astype(int)+data_offset
+            position = mesh_dict["mesh"].bounds[0].astype(int) + data_offset
 
             end_position = position + np.array(voxelized.matrix.shape)
-        
-            voxel_array[position[0]:end_position[0], 
-                        position[1]:end_position[1], 
-                        position[2]:end_position[2]] += voxelized.matrix *(i + 1)
+
+            voxel_array[
+                position[0] : end_position[0],
+                position[1] : end_position[1],
+                position[2] : end_position[2],
+            ] += voxelized.matrix * (i + 1)
 
         voxel_array = self._array_trim(voxel_array)
         voxel_array = voxel_array.astype(np.uint16)
         self.datasets[test_name] = voxel_array
-        self.resolution[test_name] = (1,1,1)
+        self.resolution[test_name] = (1, 1, 1)
         self.total_volume = np.prod(voxel_array.shape)
         self.fake_data_info = meshes
-    def _array_trim(self, arr, ignore=[],margin=0):
+
+    def _array_trim(self, arr, ignore=[], margin=0):
         # small helper function to trim 3d arrays
         all = np.where(arr != 0)
         idx = ()
@@ -174,9 +178,8 @@ class DataManager:
             if i in ignore:
                 idx += (np.s_[:],)
             else:
-                idx += (np.s_[all[i].min()-margin: all[i].max()+margin+1],)
+                idx += (np.s_[all[i].min() - margin : all[i].max() + margin + 1],)
         return arr[idx]
-
 
     def load_organelle_data(
         self,
@@ -193,7 +196,8 @@ class DataManager:
         if organelle_filename not in self.paths_dict.keys():
             raise KeyError(
                 f"Organelle {organelle_filename} not found in dataset."
-                + f"Available segmentations are: {[key.split('.n5')[0] for key in self.paths_dict.keys()]}"
+                + "Available segmentations are: "
+                + f"{[key.split('.n5')[0] for key in self.paths_dict.keys()]}"
             )
 
         complete_path = self.ds_dir_path / self.paths_dict[organelle_filename]
@@ -217,11 +221,13 @@ class DataManager:
     def _read_dataset(self, ds_path, data_key):
         """Read a dataset and select the correct file
 
-        :param ds_path: ds_path should be the path to the folder inside `images`that conatins the .n5 files.
+        :param ds_path: ds_path should be the path to the folder inside `images`that c
+        onatins the .n5 files.
         :type ds_path: str
         :param organelle_filename: The name of the file that contains the organelle data
         :type organelle_filename: str
-        :param scaling_factor: Can be 0,1,2 or 3. The lower the number the higher the resolution, defaults to 3.
+        :param scaling_factor: Can be 0,1,2 or 3.
+        The lower the number the higher the resolution, defaults to 3.
         :type scaling_factor: int, optional
 
         """
@@ -288,8 +294,8 @@ class DataManager:
 
                 prop_dict[label]["all_coords"] = prop.coords
 
-                #prop_dict[label]["orientation"] = prop.orientation
-                
+                # prop_dict[label]["orientation"] = prop.orientation
+
                 prop_dict[label]["inertia_tensor"] = prop.inertia_tensor
 
                 eigenvalues, _ = np.linalg.eig(prop.inertia_tensor)
@@ -298,12 +304,9 @@ class DataManager:
                 cylindricality = eigenvalues[1] / eigenvalues[2]
                 sphericality = 1 - max(flatness, cylindricality)
 
-                prop_dict[label]["flatness"]=flatness
-                prop_dict[label]["cylindricality"]=cylindricality
-                prop_dict[label]["sphericality_inertia_tensor"]=sphericality
-
-
-
+                prop_dict[label]["flatness"] = flatness
+                prop_dict[label]["cylindricality"] = cylindricality
+                prop_dict[label]["sphericality_inertia_tensor"] = sphericality
 
         df = pd.DataFrame(prop_dict).T
         df.index.rename("Label", inplace=True)
@@ -335,7 +338,7 @@ class DataManager:
                 verts, faces, _, _ = measure.marching_cubes(
                     ds_filtered[:], spacing=self.resolution[organelle_type]
                 )
-            except RuntimeError as e:
+            except RuntimeError:
                 logging.warning("Could not generate mesh for label %s", label)
                 logging.warning(np.unique(ds_filtered))
                 continue
@@ -390,8 +393,7 @@ class DataManager:
         volume = mesh.volume
         surface_area = mesh.area
 
-        sphericity_index = (36 * np.pi * volume ** 2) ** (1 / 3) / surface_area
-
+        sphericity_index = (36 * np.pi * volume**2) ** (1 / 3) / surface_area
 
         # flatness/squareness
         bounding_box = mesh.bounding_box_oriented
@@ -450,9 +452,11 @@ class DataManager:
 
         :param label: The label to find the closest neighbour for.
         :type label: int
-        :param max_distance: The maximum distance between two objects to be considered neighbours in nm, defaults to 200
+        :param max_distance: The maximum distance between two objects
+        to be considered neighbours in nm, defaults to 200
         :type distance_threshhold: int, optional
-        :param min_distance: The minimum distance between two objects to be considered neighbours in nm, defaults to 0
+        :param min_distance: The minimum distance between two objects
+        to be considered neighbours in nm, defaults to 0
         :type distance_threshhold: int, optional
         :return: The label of the closest neighbour
         :rtype: int
@@ -474,9 +478,11 @@ class DataManager:
     def find_neighbours(self, max_distance=200, min_distance=0):
         """Find neighbours in radius for all objects in the dataset.
 
-        :param max_distance: The maximum distance between two objects to be considered neighbours in nm, defaults to 200
+        :param max_distance: The maximum distance between two objects
+        to be considered neighbours in nm, defaults to 200
         :type distance_threshhold: int, optional
-        :param min_distance: The minimum distance between two objects to be considered neighbours in nm, defaults to 0
+        :param min_distance: The minimum distance between two objects
+        to be considered neighbours in nm, defaults to 0
         :type distance_threshhold: int, optional
 
         :return: A dictionary containing the neighbours for each label
@@ -522,7 +528,8 @@ class DataManager:
         )
 
         # https://trimesh.org/trimesh.boolean.html
-        # would be very nice, but seems to require additional installation of blender or openscad
+        # would be very nice, but seems to require additional
+        # installation of blender or openscad
         # https://github.com/mikedh/trimesh/issues/333
         # intersection = trimesh.boolean.intersection(meshes)
 
@@ -609,7 +616,7 @@ class DataManager:
                         skeleton.path_coordinates(i) for i in range(skeleton.n_paths)
                     ]
 
-                except ValueError as e:
+                except ValueError:
                     logging.debug("Could not generate skeleton for label %s", number)
                     continue
 
@@ -631,12 +638,11 @@ class DataManager:
             key_list.append((key[0], key[1]))
             branch_dist_dict[(key[0], key[1])].append(value["branch-distance"])
             euclidean_dist_dict[(key[0], key[1])].append(value["euclidean-distance"])
-            #again i am not sure why this can happen
+            # again i am not sure why this can happen
             try:
                 branch_angle_dict[(key[0], key[1])].append(value["branch-angle"])
             except KeyError:
                 branch_angle_dict[(key[0], key[1])].append(-3)
-
 
         for key in key_list:
             mean_branch_dict[key]["mean_branch_len"] = np.mean(branch_dist_dict[key])
@@ -668,7 +674,8 @@ class DataManager:
         branch_dict = defaultdict(dict)
 
         # get branch informations:
-        # no branches from branch, branch length, euclidean length, branch start, branch end, branch type, branch order, branch angle
+        # no branches from branch, branch length, euclidean length, branch start,
+        # branch end, branch type, branch order, branch angle
         for organelle_type in organelle_types:
             for number, skeleton in self.skeletons[organelle_type].items():
                 paths_table = skan.summarize(skeleton["skeleton"])
@@ -739,7 +746,7 @@ class DataManager:
                                 * np.linalg.norm(branch_vector)
                             )
                             angle = np.arccos(cos_angle) * 180 / np.pi
-                        except:
+                        except FloatingPointError:
                             angle = -1
 
                         branch_dict[(organelle_type, number, i)][
@@ -782,8 +789,6 @@ class DataManager:
 
         if exclude_ids is not None:
             index = [i for i in index if i not in exclude_ids]
-           
-
 
         for mesh_idx, mesh_raw in self.mesh_dict.items():
             if mesh_idx not in index:
@@ -833,15 +838,14 @@ class DataManager:
             skeletons = self.skeletons
             for type_, skels_per_type in skeletons.items():
                 for id_, skel in skels_per_type.items():
-                    type_id= f"{type_}_{id_}"
+                    type_id = f"{type_}_{id_}"
                     if type_id in index:
                         color = "black"
                         width = 4
-                        for i,path in enumerate(skel["all_paths"]):
-                            
+                        for i, path in enumerate(skel["all_paths"]):
                             show_legend = False
-                            path = path*self.resolution[type_]
-                            
+                            path = path * self.resolution[type_]
+
                             meshes.append(
                                 go.Scatter3d(
                                     x=path[:, 0],
@@ -850,15 +854,10 @@ class DataManager:
                                     mode="lines",
                                     name=f"{type_}_{id_}",
                                     legendgroup=f"{type_}_{id_}",
-                                    showlegend= show_legend,
+                                    showlegend=show_legend,
                                     line=dict(color=color, width=width),
                                 )
                             )
-
-
-
-
-
 
         # draw figure
         fig = go.Figure()
@@ -867,12 +866,7 @@ class DataManager:
 
         return fig
 
-
-
-
-
-
-    def draw_2d_slices(self, organelle_type, port=8083, show_skeletons = False):
+    def draw_2d_slices(self, organelle_type, port=8083, show_skeletons=False):
         """Start a small dash app that allows you to scroll through the slices of the dataset.
 
         :return: Dash app visualization
@@ -898,9 +892,7 @@ class DataManager:
 
         @app.callback(Output("graph", "figure"), Input("slices", "value"))
         def filter_heatmap(slice):
-            ds_slice = self.datasets[organelle_type][
-                :, :, slice
-            ]  
+            ds_slice = self.datasets[organelle_type][:, :, slice]
             # replace 0 with nan
             ds_slice = np.where(ds_slice == 0, np.nan, ds_slice)
             fig = px.imshow(ds_slice)
@@ -919,26 +911,23 @@ class DataManager:
         data = []
         for type_, skels_per_type in skeletons.items():
             for id, skel in skels_per_type.items():
-
                 color = next(color_cycle)
 
-                for i,path in enumerate(skel["all_paths"]):
-                    
-                    if i==0:
+                for i, path in enumerate(skel["all_paths"]):
+                    if i == 0:
                         show_legend = True
                     else:
                         show_legend = False
-                    
-                    
+
                     data.append(
-                         go.Scatter3d(
+                        go.Scatter3d(
                             x=path[:, 0],
                             y=path[:, 1],
                             z=path[:, 2],
                             mode="lines",
                             name=f"{type_}_{id}",
                             legendgroup=f"{type_}_{id}",
-                            showlegend= show_legend,
+                            showlegend=show_legend,
                             line=dict(color=color, width=width),
                         )
                     )
