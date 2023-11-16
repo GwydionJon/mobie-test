@@ -417,7 +417,7 @@ class DataManager:
             )
             mesh_dict[label]["sphericity"] = sphericity_index
             mesh_dict[label]["flatness_ratio"] = flatness_ratio
-
+            mesh_dict[label]["is_mcs"] = np.zeros(len(tri_mesh.vertices))
             # save mesh_dict[label] to json without the tri_mesh
             if save_dir is not None:
                 filename = save_dir / f"{label}.json"
@@ -644,6 +644,62 @@ class DataManager:
             ]
         ]
 
+    def find_mcs(self, distance):
+        if self.mesh_dict is None:
+            self.generate_mesh()
+
+        if self.distance_df is None:
+            self.calculate_distance_matrix()
+
+        # find all neighbours within distance
+        neighbours_dict = self.find_neighbours(max_distance=distance)
+        for mesh_label, contact_partners in neighbours_dict.items():
+            all_contact_verticies = []
+            self.mesh_dict[mesh_label]["contact_area"] = []
+            total_area = 0
+            self.mesh_dict[mesh_label]["contact_partner"] = []
+            self.mesh_dict[mesh_label]["contact_area"] = []
+            main_mesh = self.mesh_dict[mesh_label]["tri_mesh"]
+
+            # reset is_mcs to zero
+            self.mesh_dict[mesh_label]["is_mcs"] = np.zeros(len(main_mesh.vertices))
+            for contact_partner in contact_partners:
+                contact_mesh = self.mesh_dict[contact_partner]["tri_mesh"]
+
+                prox_query = trimesh.proximity.ProximityQuery(main_mesh)
+                dist, vertex_id = prox_query.vertex(contact_mesh.vertices)
+                vertex_id = vertex_id[dist < distance]
+                unique_vertices = np.unique(vertex_id)
+
+                # ignore small sites as they cause errors in the convex hull
+                if len(unique_vertices) <= 4:
+                    continue
+
+                all_contact_verticies.append(unique_vertices)
+
+                # generate surface mesh for the contact area
+                vertices = main_mesh.vertices[unique_vertices]
+
+                hull = ConvexHull(vertices)
+                contact_mesh = trimesh.Trimesh(
+                    vertices=hull.points, faces=hull.simplices
+                )
+                contact_mesh.fix_normals()
+                contact_area = contact_mesh.area
+
+                self.mesh_dict[mesh_label]["contact_partner"].append(contact_partner)
+                self.mesh_dict[mesh_label]["contact_area"].append(contact_area)
+                total_area += contact_area
+            self.analysis_results.loc[mesh_label, "total_contact_area"] = total_area
+
+            if all_contact_verticies == []:
+                continue
+            # label all vertices that are part of a contact
+            all_contact_verticies = np.concatenate(all_contact_verticies)
+            all_unique_contact_verticies = np.unique(all_contact_verticies)
+
+            self.mesh_dict[mesh_label]["is_mcs"][all_unique_contact_verticies] = 1
+
     # task 2.0
 
     def generate_morphology_map(self, radius=3):
@@ -851,6 +907,7 @@ class DataManager:
         show_collisions=False,
         show_skeletons=False,
         show_morphology=False,
+        show_mcs=False,
     ):
         """Draw the meshes in 3d using plotly, allows for filtering.
             If collisions have been detected they will be drawn as well.
@@ -890,10 +947,19 @@ class DataManager:
             vertsT = np.transpose(verts)
             facesT = np.transpose(faces)
 
+            if show_morphology and show_mcs:
+                raise Warning("Can't show morphology and mcs at the same time.")
+
             if show_morphology:
                 curvature_vertices = mesh_raw["curvature_vertices"]
                 intensity = curvature_vertices
                 colorscale = "Viridis"
+
+            elif show_mcs:
+                is_mcs = mesh_raw["is_mcs"]
+                intensity = is_mcs
+                colorscale = "Viridis"
+
             else:
                 intensity = None
                 colorscale = None
