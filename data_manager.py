@@ -14,6 +14,7 @@ from scipy.spatial import ConvexHull
 import skan
 from skimage.morphology import skeletonize_3d
 import itertools
+from joblib import Parallel, delayed
 
 
 class DataManager:
@@ -92,11 +93,19 @@ class DataManager:
 
         for i, (scale, translation) in enumerate(zip(scales, translations)):
             # Create an icosphere and scale it to create a random shape
-            mesh = trimesh.creation.icosphere(subdivisions=2, radius=1)
+
+            rand_object = np.random.rand()
+            if rand_object < 0.7:
+                mesh = trimesh.creation.icosphere(subdivisions=2, radius=1)
+                mesh.apply_scale(scale)
+
+            elif rand_object < 1:
+                height = np.random.randint(1, scale, 1)[0]
+                radius = np.random.randint(3, scale * 1.4, 1)[0]
+                print(height, radius)
+                mesh = trimesh.creation.cylinder(radius=radius, height=height)
 
             # translate and rotate object, but don't make any overlaps
-
-            mesh.apply_scale(scale)
 
             mesh.apply_translation(translation)
             mesh.apply_transform(trimesh.transformations.random_rotation_matrix())
@@ -289,7 +298,7 @@ class DataManager:
                 bbox_volume = np.prod(bbox[1] * 5 - bbox[0] * 5)
                 prop_dict[label]["bbox_vol_nm"] = bbox_volume
 
-                prop_dict[label]["centroid"] = prop.centroid
+                prop_dict[label]["cenlabeltroid"] = prop.centroid
                 prop_dict[label]["solidity"] = prop.solidity
 
                 prop_dict[label]["all_coords"] = prop.coords
@@ -315,55 +324,28 @@ class DataManager:
         return df
 
     # for task 1.0
-    def generate_mesh(self, organelle_types=None):
+    def generate_mesh(self, organelle_types=None, save_dir=None):
         """
         Generate a mesh for each label in the dataset.
         Add Surface area and volume to self.analysis_results
         also generates the self.mesh_dict.
         """
+
         if self.analysis_results is None:
             self.get_voxel_properties()
 
         if organelle_types is None:
             organelle_types = self.datasets.keys()
+
         elif isinstance(organelle_types, str):
             organelle_types = [organelle_types]
-        mesh_dict = defaultdict(dict)
 
-        for label in self.analysis_results.index:
-            organelle_type = label.split("_")[0]
-            ds_filtered = self._filter_ds(label, organelle_type)
+        # if save_dir is not None and Path(save_dir).exists():
+        #     logging.info("Folder already exists, loading meshes directly from file.")
+        #     mesh_dict = self._load_mesh_json(save_dir)
 
-            try:
-                verts, faces, _, _ = measure.marching_cubes(
-                    ds_filtered[:], spacing=self.resolution[organelle_type]
-                )
-            except RuntimeError:
-                logging.warning("Could not generate mesh for label %s", label)
-                logging.warning(np.unique(ds_filtered))
-                continue
-
-            # attach the actual mesh to the df (likely not needed)
-            mesh_dict[label]["type"] = organelle_type
-
-            mesh_dict[label]["faces"] = faces
-            mesh_dict[label]["verts"] = verts
-
-            # calc volume and surface area
-            tri_mesh = trimesh.Trimesh(
-                vertices=mesh_dict[label]["verts"], faces=mesh_dict[label]["faces"]
-            )
-            trimesh.repair.fix_inversion(tri_mesh)
-            mesh_dict[label]["tri_mesh"] = tri_mesh
-            mesh_dict[label]["volume"] = tri_mesh.volume
-            mesh_dict[label]["surf_area_mesh_nm"] = tri_mesh.area
-            mesh_dict[label]["water_tight"] = tri_mesh.is_watertight
-            sphericity_index, flatness_ratio = self._calculate_sphericity_and_flatness(
-                tri_mesh
-            )
-
-            mesh_dict[label]["sphericity"] = sphericity_index
-            mesh_dict[label]["flatness_ratio"] = flatness_ratio
+        # else:
+        mesh_dict = self._generate_mesh_dict(save_dir=save_dir)
 
         self.analysis_results["surf_area_mesh_nm"] = [
             mesh["surf_area_mesh_nm"] for mesh in mesh_dict.values()
@@ -387,6 +369,89 @@ class DataManager:
         ]
 
         self.mesh_dict = mesh_dict
+
+        # # write file if it doesn't exist yet
+        # if filename is not None and not Path(filename).exists():
+        #     self._export_mesh_dict(filename)
+
+    def _load_mesh_json(self, filename):
+        with open(filename, "r") as f:
+            mesh_dict = json.load(f)
+        for label, mesh_info in mesh_dict.items():
+            mesh_dict[label]["tri_mesh"] = trimesh.Trimesh(
+                vertices=mesh_info["verts"], faces=mesh_info["faces"]
+            )
+        return mesh_dict
+
+    def _generate_mesh_dict(self, save_dir=None):
+        def _generate_single_mesh(label, save_dir=None):
+            logging.debug(f"Generating mesh for label: {label}")
+            organelle_type = label.split("_")[0]
+            ds_filtered = self._filter_ds(label, organelle_type)
+
+            try:
+                verts, faces, _, _ = measure.marching_cubes(
+                    ds_filtered[:], spacing=self.resolution[organelle_type]
+                )
+            except RuntimeError:
+                logging.warning("Could not generate mesh for label %s", label)
+                logging.warning(np.unique(ds_filtered))
+                return None
+
+            # attach the actual mesh to the df (likely not needed)
+            mesh_dict[label]["type"] = organelle_type
+
+            mesh_dict[label]["faces"] = faces
+            mesh_dict[label]["verts"] = verts
+
+            # calc volume and surface area
+            tri_mesh = trimesh.Trimesh(
+                vertices=mesh_dict[label]["verts"], faces=mesh_dict[label]["faces"]
+            )
+            trimesh.repair.fix_inversion(tri_mesh)
+            mesh_dict[label]["volume"] = tri_mesh.volume
+            mesh_dict[label]["surf_area_mesh_nm"] = tri_mesh.area
+            mesh_dict[label]["water_tight"] = tri_mesh.is_watertight
+            sphericity_index, flatness_ratio = self._calculate_sphericity_and_flatness(
+                tri_mesh
+            )
+            mesh_dict[label]["sphericity"] = sphericity_index
+            mesh_dict[label]["flatness_ratio"] = flatness_ratio
+
+            # save mesh_dict[label] to json without the tri_mesh
+            if save_dir is not None:
+                filename = save_dir / f"{label}.json"
+                self._export_mesh_dict(mesh_dict[label], filename)
+            # add tri mesh after dict has been saved.
+            mesh_dict[label]["tri_mesh"] = tri_mesh
+
+        # start computation
+        mesh_dict = defaultdict(dict)
+
+        if save_dir is not None:
+            save_dir = Path(save_dir)
+            save_dir.mkdir(exist_ok=True)
+        Parallel(n_jobs=-1, prefer="threads", require="sharedmem")(
+            delayed(_generate_single_mesh)(label, save_dir)
+            for label in self.analysis_results.index
+        )
+
+        return mesh_dict
+
+    def _export_mesh_dict(self, mesh_dict, filename):
+        export_dict = {}
+
+        export_dict = {}
+        export_dict["faces"] = mesh_dict["faces"].tolist()
+        export_dict["verts"] = mesh_dict["verts"].tolist()
+        export_dict["volume"] = mesh_dict["volume"]
+        export_dict["surf_area_mesh_nm"] = mesh_dict["surf_area_mesh_nm"]
+        export_dict["water_tight"] = mesh_dict["water_tight"]
+        export_dict["sphericity"] = mesh_dict["sphericity"]
+        export_dict["flatness_ratio"] = mesh_dict["flatness_ratio"]
+
+        with open(filename, "w") as f:
+            json.dump(export_dict, f)
 
     def _calculate_sphericity_and_flatness(self, mesh):
         # Calculate the volume and surface area of the mesh
@@ -579,6 +644,23 @@ class DataManager:
             ]
         ]
 
+    # task 2.0
+
+    def generate_morphology_map(self, radius=3):
+        if self.mesh_dict is None:
+            self.generate_mesh()
+
+        for key, mesh in self.mesh_dict.items():
+            mesh_smooth = mesh["tri_mesh"]
+            trimesh.smoothing.filter_laplacian(mesh_smooth)
+
+            sample_points = mesh_smooth.vertices
+            curvature_vertices = trimesh.curvature.discrete_gaussian_curvature_measure(
+                mesh_smooth, sample_points, radius=radius
+            )
+
+            self.mesh_dict[key]["curvature_vertices"] = curvature_vertices
+
     # for task 3
 
     def generate_skeletons(self, organelle_types=None):
@@ -762,7 +844,14 @@ class DataManager:
         df.index.names = ["organelle type", "org id", "branch id"]
         return df
 
-    def draw_3d_meshes(self, filter_ids=None, exclude_ids=None, show_skeletons=False):
+    def draw_3d_meshes(
+        self,
+        filter_ids=None,
+        exclude_ids=None,
+        show_collisions=False,
+        show_skeletons=False,
+        show_morphology=False,
+    ):
         """Draw the meshes in 3d using plotly, allows for filtering.
             If collisions have been detected they will be drawn as well.
 
@@ -801,6 +890,14 @@ class DataManager:
             vertsT = np.transpose(verts)
             facesT = np.transpose(faces)
 
+            if show_morphology:
+                curvature_vertices = mesh_raw["curvature_vertices"]
+                intensity = curvature_vertices
+                colorscale = "Viridis"
+            else:
+                intensity = None
+                colorscale = None
+
             go_mesh = go.Mesh3d(
                 x=vertsT[0],
                 y=vertsT[1],
@@ -809,11 +906,38 @@ class DataManager:
                 j=facesT[1],
                 k=facesT[2],
                 name=mesh_idx,
-                opacity=0.4,
+                opacity=0.8,
+                intensity=intensity,
+                colorscale=colorscale,
             )
             meshes.append(go_mesh)
 
-        if self.collision_dict is not None:
+        # if show_morphology:
+
+        #     for key, mesh_dict in self.mesh_dict.items():
+        #         if key not in index:
+        #             continue
+        #         verts = mesh_dict["verts"]
+        #         curvature_vertices = mesh_dict["curvature_vertices"]
+        #         vertsT = np.transpose(verts)
+        #         go_points = go.Scatter3d(
+        #             x=vertsT[0],
+        #             y=vertsT[1],
+        #             z=vertsT[2],
+        #             name="Curvature_" + key,
+        #             mode="markers",
+        #             marker=dict(
+        #                 size=5,
+        #                 color=curvature_vertices,
+        #                 colorscale="Viridis",
+        #                 opacity=0.8,
+        #             ),
+        #             text=curvature_vertices,
+        #             showlegend=True,
+        #         )
+        #         meshes.append(go_points)
+
+        if self.collision_dict is not None and show_collisions:
             for key, value in self.collision_dict.items():
                 points = value["points"]
                 pointsT = np.transpose(points)
